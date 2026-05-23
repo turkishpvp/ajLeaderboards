@@ -9,8 +9,9 @@ import us.ajg0702.leaderboards.LeaderboardPlugin;
 import static us.ajg0702.leaderboards.LeaderboardPlugin.message;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Remove extends SubCommand {
     private final LeaderboardPlugin plugin;
@@ -26,7 +27,7 @@ public class Remove extends SubCommand {
         return Collections.emptyList();
     }
 
-    final HashMap<Object, String> confirmDeletes = new HashMap<>();
+    final Map<Object, String> confirmDeletes = new ConcurrentHashMap<>();
 
     @Override
     public void execute(CommandSender sender, String[] args, String label) {
@@ -59,7 +60,7 @@ public class Remove extends SubCommand {
 
             }, 15*20);
         } else {
-            confirmDeletes.remove(sender);
+            confirmDeletes.remove(sender.getHandle());
             if(plugin.getCache().removeBoard(board)) {
                 sender.sendMessage(message("&aThe board has been removed!"));
             } else {

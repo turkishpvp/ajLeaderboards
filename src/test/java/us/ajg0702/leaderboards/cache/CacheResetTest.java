@@ -155,7 +155,7 @@ public class CacheResetTest {
         
         // The difference should be enormous - the buggy code treats seconds as milliseconds
         // resulting in a timestamp ~50 years in the past (depending on when run)
-        long difference = correctNow - buggyTimestamp;
+        long difference = Math.abs(correctNow - buggyTimestamp);
         
         System.out.println("Current time (ms): " + correctNow);
         System.out.println("Buggy timestamp (ms): " + buggyTimestamp);

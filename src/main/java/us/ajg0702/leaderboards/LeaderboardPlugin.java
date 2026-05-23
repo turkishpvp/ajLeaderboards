@@ -16,7 +16,6 @@ import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.scheduler.BukkitWorker;
 import org.spongepowered.configurate.CommentedConfigurationNode;
 import org.spongepowered.configurate.ConfigurateException;
 import org.spongepowered.configurate.serialize.SerializationException;
@@ -77,6 +76,8 @@ public class LeaderboardPlugin extends JavaPlugin {
     private ArmorStandManager armorStandManager;
     private LuckpermsContextLoader contextLoader;
     private ResetSaver resetSaver;
+    private Metrics metrics;
+    private PlaceholderExpansion placeholders;
     private final Exporter exporter = new Exporter(this);
     private final PlaceholderFormatter placeholderFormatter = new PlaceholderFormatter(this);
 
@@ -221,11 +222,11 @@ public class LeaderboardPlugin extends JavaPlugin {
                 30 * 20
         );
 
-        Metrics metrics = new Metrics(this, 9338);
+        metrics = new Metrics(this, 9338);
         metrics.addCustomChart(new Metrics.SimplePie("storage_method", () -> getCache().getMethod().getName()));
         metrics.addCustomChart(new Metrics.SingleLineChart("boards", () -> getTopManager().getBoards().size()));
 
-        PlaceholderExpansion placeholders = new PlaceholderExpansion(this);
+        placeholders = new PlaceholderExpansion(this);
         if(placeholders.register()) {
             getLogger().info("PAPI placeholders successfully registered!");
         } else {
@@ -268,11 +269,30 @@ public class LeaderboardPlugin extends JavaPlugin {
         shuttingDown = true;
         if(getContextLoader() != null) getContextLoader().checkReload(false);
         getScheduler().cancelTasks();
+        offlineUpdaters.values().forEach(OfflineUpdater::cancel);
+        offlineUpdaters.clear();
+        if(metrics != null) metrics.shutdown();
+        if(placeholders != null) placeholders.clearCache();
+        getPlaceholderFormatter().clearCache();
+        if(getCache() != null) getCache().clearCaches();
+        if(getSignManager() != null) getSignManager().shutdown();
+        if(getHeadManager() != null) getHeadManager().clearCache();
+        if(getArmorStandManager() != null) getArmorStandManager().clearCache();
+        if(getHeadUtils() != null) getHeadUtils().shutdown();
+        if(adventure != null) {
+            adventure.close();
+            adventure = null;
+        }
         scheduledExecutorService.shutdown();
         if(getTopManager() != null) getTopManager().shutdown(fastShutdown);
         try {
-            scheduledExecutorService.awaitTermination(fastShutdown ? 1 : 10, TimeUnit.SECONDS);
-        } catch (InterruptedException ignored) {}
+            if(!scheduledExecutorService.awaitTermination(fastShutdown ? 1 : 10, TimeUnit.SECONDS)) {
+                scheduledExecutorService.shutdownNow();
+            }
+        } catch (InterruptedException ignored) {
+            scheduledExecutorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
 
         if(getCache() != null) {
             ExecutorService executorService = Executors.newSingleThreadExecutor();
@@ -290,14 +310,7 @@ public class LeaderboardPlugin extends JavaPlugin {
             }catch(InterruptedException ignored){}
         }
 
-        if(!fastShutdown) {
-            getLogger().info("Killing remaining workers");
-            killWorkers(1000);
-            Debug.info("1st kill pass done, retrying for remaining");
-            killWorkers(5000);
-            getLogger().info("Remaining workers killed");
-        } else {
-            killWorkers(100);
+        if(fastShutdown) {
             getLogger().warning("Fast shutdown is enabled! If you see warnings/errors to nag me about shutting down async tasks, you should be able to ignore them. Disable fast-shutdown if you don't want to see those warnings/errors or this message.");
         }
 
@@ -308,28 +321,6 @@ public class LeaderboardPlugin extends JavaPlugin {
             for (StackTraceElement stackTraceElement : bukkitWorker.getThread().getStackTrace()) {
                 Debug.info(" - "+stackTraceElement);
             }
-        });
-    }
-
-    private void killWorkers(int waitForDeath) {
-        List<BukkitWorker> workers = new ArrayList<>(getScheduler().getActiveWorkers());
-        List<Integer> killedWorkers = new ArrayList<>();
-        workers.forEach(bukkitWorker -> {
-            if(!bukkitWorker.getOwner().equals(this)) return;
-            int id = bukkitWorker.getTaskId();
-            if(killedWorkers.contains(id)) return;
-            Debug.info("Got worker "+id);
-            try {
-                bukkitWorker.getThread().interrupt();
-                Debug.info("Interupted");
-                bukkitWorker.getThread().join(waitForDeath);
-                Debug.info("Death");
-            } catch(SecurityException e) {
-                Debug.info("denied: "+e.getMessage());
-            } catch (InterruptedException ignored) {
-                Debug.info("threw interupted exception on "+id);
-            }
-            killedWorkers.add(id);
         });
     }
 
@@ -480,7 +471,7 @@ public class LeaderboardPlugin extends JavaPlugin {
         getLogger().info("Offline player updates scheduled for boards: " + validBoards + " (every " + intervalHours + " hours)");
     }
 
-    final HashMap<TimedType, Task> resetTasks = new HashMap<>();
+    final Map<TimedType, Task> resetTasks = new ConcurrentHashMap<>();
     public void scheduleResets() {
         resetTasks.values().forEach(Task::cancel);
         resetTasks.clear();

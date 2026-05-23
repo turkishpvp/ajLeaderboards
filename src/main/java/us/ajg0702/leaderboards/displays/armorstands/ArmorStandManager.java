@@ -197,4 +197,8 @@ public class ArmorStandManager {
         if(world == null) return;
         world.spawnParticle(Particle.FLAME, curloc.add(0.5, 0.5, 0.5).toVector().toLocation(curloc.getWorld()), 20, 0.25, 0.25, 0.25, 0);
     }
+
+    public void clearCache() {
+        armorStandCache.clear();
+    }
 }

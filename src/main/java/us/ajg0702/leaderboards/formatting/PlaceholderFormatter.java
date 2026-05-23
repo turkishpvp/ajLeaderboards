@@ -65,4 +65,8 @@ public class PlaceholderFormatter {
     public String toFormat(double input, String board) {
         return getFormatFor(null, board).toFormat(input);
     }
+
+    public void clearCache() {
+        formatCache.clear();
+    }
 }

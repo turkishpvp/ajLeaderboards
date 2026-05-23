@@ -18,6 +18,7 @@ import us.ajg0702.utils.spigot.VersionSupport;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 public class HeadUtils {
@@ -107,13 +108,16 @@ public class HeadUtils {
     }
 
 
-    Map<String, CachedData<String>> skinCache = new HashMap<>();
-    final long lastClear = System.currentTimeMillis();
+    private static final int MAX_HEAD_CACHE_SIZE = 1000;
+
+    Map<String, CachedData<String>> skinCache = new ConcurrentHashMap<>();
+    long lastClear = System.currentTimeMillis();
 
     public String getHeadValue(String nameOrUUID) {
 
         if(System.currentTimeMillis() - lastClear > 5400e3) { // completely wipe the cache every hour and a half
-            skinCache = new HashMap<>();
+            skinCache.clear();
+            lastClear = System.currentTimeMillis();
         }
 
         if(skinCache.containsKey(nameOrUUID) && skinCache.get(nameOrUUID).getTimeSince() < 300e3) {
@@ -132,6 +136,7 @@ public class HeadUtils {
         byte[] skinByte = ("{\"textures\":{\"SKIN\":{\"url\":\"" + url + "\"}}}").getBytes();
         String finalSkin = new String(Base64.getEncoder().encode(skinByte));
         skinCache.put(nameOrUUID, new CachedData<>(finalSkin));
+        trimToLimit(skinCache);
         return finalSkin;
     }
 
@@ -157,11 +162,12 @@ public class HeadUtils {
             .cache(null)
             .build();
 
-    final HashMap<String, String> urlCache = new HashMap<>();
-    final HashMap<String, Long> urlLastget = new HashMap<>();
-    final HashMap<String, Long> lastFail = new HashMap<>();
+    final Map<String, String> urlCache = new ConcurrentHashMap<>();
+    final Map<String, Long> urlLastget = new ConcurrentHashMap<>();
+    final Map<String, Long> lastFail = new ConcurrentHashMap<>();
     private final Random random = new Random();
     private String getURLContent(String urlStr) {
+        pruneUrlCaches();
         if(
                 urlLastget.containsKey(urlStr) &&
                         System.currentTimeMillis() - urlLastget.get(urlStr) < 300e3 // Cache for 5 minutes
@@ -204,5 +210,35 @@ public class HeadUtils {
         } catch (IOException e) {
             throw new RuntimeException("Error while fetching " + urlStr + ":", e);
         }
+    }
+
+    private void pruneUrlCaches() {
+        long now = System.currentTimeMillis();
+        if(urlCache.size() <= MAX_HEAD_CACHE_SIZE && lastFail.size() <= MAX_HEAD_CACHE_SIZE) return;
+
+        urlLastget.entrySet().removeIf(entry -> now - entry.getValue() > 300e3);
+        urlCache.keySet().removeIf(key -> !urlLastget.containsKey(key));
+        lastFail.entrySet().removeIf(entry -> now - entry.getValue() > 30e3);
+
+        trimToLimit(urlCache);
+        trimToLimit(urlLastget);
+        trimToLimit(lastFail);
+    }
+
+    private void trimToLimit(Map<String, ?> map) {
+        Iterator<String> iterator = map.keySet().iterator();
+        while(map.size() > MAX_HEAD_CACHE_SIZE && iterator.hasNext()) {
+            iterator.next();
+            iterator.remove();
+        }
+    }
+
+    public void shutdown() {
+        skinCache.clear();
+        urlCache.clear();
+        urlLastget.clear();
+        lastFail.clear();
+        httpClient.dispatcher().executorService().shutdown();
+        httpClient.connectionPool().evictAll();
     }
 }

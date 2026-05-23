@@ -994,6 +994,14 @@ public class Cache {
 		plugin.getTopManager().positionPlayerCache.remove(player.getUniqueId());
 	}
 
+	public void clearCaches() {
+		nonExistantBoards.clear();
+		rolling.clear();
+		sortByIndexes.clear();
+		zeroPlayers.clear();
+		dataSortByIndexes.clear();
+	}
+
 	public List<String> getNonExistantBoards() {
 		return nonExistantBoards;
 	}

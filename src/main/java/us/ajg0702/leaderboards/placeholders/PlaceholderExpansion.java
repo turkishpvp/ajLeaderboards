@@ -124,4 +124,8 @@ public class PlaceholderExpansion extends me.clip.placeholderapi.expansion.Place
     public boolean canRegister() {
         return true;
     }
+
+    public void clearCache() {
+        placeholderCache.clear();
+    }
 }

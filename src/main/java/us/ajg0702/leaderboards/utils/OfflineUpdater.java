@@ -8,16 +8,21 @@ import us.ajg0702.leaderboards.LeaderboardPlugin;
 import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static us.ajg0702.leaderboards.LeaderboardPlugin.message;
 
 public class OfflineUpdater {
+    private static final int BATCH_SIZE = 25;
+
     private final Deque<OfflinePlayer> offlinePlayerQueue = new ConcurrentLinkedDeque<>();
     private final LeaderboardPlugin plugin;
     private final CommandSender reportTo;
     private final int started;
     private final String board;
-    private long startedTime;
+    private final long startedTime;
+    private final AtomicBoolean finished = new AtomicBoolean(false);
+    private volatile boolean cancelled = false;
 
     public OfflineUpdater(LeaderboardPlugin plugin, String board, OfflinePlayer[] players, @Nullable CommandSender reportTo) {
         this.plugin = plugin;
@@ -25,27 +30,69 @@ public class OfflineUpdater {
         this.reportTo = reportTo;
         offlinePlayerQueue.addAll(Arrays.asList(players));
         started = offlinePlayerQueue.size();
+        startedTime = System.currentTimeMillis();
 
-        plugin.getScheduler().runTaskAsynchronously(() -> {
-            startedTime = System.currentTimeMillis();
-            while(!offlinePlayerQueue.isEmpty() && !plugin.isShuttingDown()) {
-                OfflinePlayer player = offlinePlayerQueue.pop();
-                plugin.getCache().updateStat(board, player);
-            }
-            if(plugin.isShuttingDown()) {
-                plugin.getLogger().info("[OfflineUpdater] " + board + ": Canceling due to plugin shutdown");
-            } else {
-                long duration = System.currentTimeMillis() - startedTime;
-                double durationSeconds = Math.round(duration / 10d) / 100d;
-                plugin.getLogger().info("[OfflineUpdater] " + board + ": Finished in " + durationSeconds + "s " + duration);
-                if(reportTo != null) {
-                    reportTo.sendMessage(message(
-                            "&aFinished updating all offline players for &f" + board + " &ain&f " + durationSeconds + "&as"
-                    ));
-                }
-            }
-            plugin.getOfflineUpdaters().remove(board, this);
-        });
+        scheduleNextBatch();
+    }
+
+    private void scheduleNextBatch() {
+        if(cancelled || plugin.isShuttingDown()) {
+            finish(true);
+            return;
+        }
+        if(plugin.getTopManager().submit(this::runBatch) == null) {
+            finish(true);
+        }
+    }
+
+    private void runBatch() {
+        if(cancelled || plugin.isShuttingDown()) {
+            finish(true);
+            return;
+        }
+
+        int processed = 0;
+        while(processed < BATCH_SIZE && !offlinePlayerQueue.isEmpty() && !cancelled && !plugin.isShuttingDown()) {
+            OfflinePlayer player = offlinePlayerQueue.poll();
+            if(player == null) break;
+            plugin.getCache().updateStat(board, player);
+            processed++;
+        }
+
+        if(offlinePlayerQueue.isEmpty()) {
+            finish(false);
+            return;
+        }
+
+        if(cancelled || plugin.isShuttingDown()) {
+            finish(true);
+            return;
+        }
+
+        plugin.getScheduler().runTaskLaterAsynchronously(this::scheduleNextBatch, 1L);
+    }
+
+    public void cancel() {
+        cancelled = true;
+        offlinePlayerQueue.clear();
+    }
+
+    private void finish(boolean canceled) {
+        if(!finished.compareAndSet(false, true)) return;
+        plugin.getOfflineUpdaters().remove(board, this);
+        if(canceled || plugin.isShuttingDown()) {
+            plugin.getLogger().info("[OfflineUpdater] " + board + ": Canceling due to plugin shutdown");
+            return;
+        }
+
+        long duration = System.currentTimeMillis() - startedTime;
+        double durationSeconds = Math.round(duration / 10d) / 100d;
+        plugin.getLogger().info("[OfflineUpdater] " + board + ": Finished in " + durationSeconds + "s " + duration);
+        if(reportTo != null) {
+            reportTo.sendMessage(message(
+                    "&aFinished updating all offline players for &f" + board + " &ain&f " + durationSeconds + "&as"
+            ));
+        }
     }
     public double getProgressPercent() {
         if (started == 0) return 1; // No players started, avoid division by zero

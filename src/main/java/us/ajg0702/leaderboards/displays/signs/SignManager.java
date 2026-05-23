@@ -157,6 +157,7 @@ public class SignManager {
     final ConcurrentHashMap<String, String> names = new ConcurrentHashMap<>();
     public void updateNameCache() {
         List<String> namesRaw = plugin.getAConfig().getStringList("value-names");
+        names.clear();
         for(String s : namesRaw) {
             if(!s.contains("%")) continue;
             String[] parts = s.split("%");
@@ -167,6 +168,17 @@ public class SignManager {
     @SuppressWarnings("unused")
     public Map<String, String> getNames() {
         return new HashMap<>(names);
+    }
+
+    public void shutdown() {
+        if(updateInterval != null) {
+            try {
+                updateInterval.cancel();
+            } catch(IllegalStateException ignored) {}
+            updateInterval = null;
+        }
+        signs.clear();
+        names.clear();
     }
 
     public void updateSign(BoardSign sign) {

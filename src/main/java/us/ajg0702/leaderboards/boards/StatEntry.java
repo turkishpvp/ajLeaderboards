@@ -320,8 +320,8 @@ public class StatEntry {
 		symbols.setDecimalSeparator(decimal);
 		DecimalFormat df = new DecimalFormat("#,###.##", symbols);
 		df.setGroupingUsed(useComma);
-		df.setMaximumFractionDigits(plugin.getAConfig().getInt("round-decimal-places"));
-		if(board != null) {
+		df.setMaximumFractionDigits(plugin == null ? 2 : plugin.getAConfig().getInt("round-decimal-places"));
+		if(plugin != null && board != null) {
 			for (String s : plugin.getAConfig().getStringList("show-zero-decimal")) {
 				if(s.startsWith("%") || s.endsWith("%")) {
 					plugin.getLogger().warning("Invalid entry for show-zero-decimal '"+ s +"'. Make sure to not include '%' in the board name!");

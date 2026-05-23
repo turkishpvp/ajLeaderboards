@@ -49,6 +49,6 @@ public class Listeners implements Listener {
     public void onQuitFirst(PlayerQuitEvent e) {
         if(!plugin.getAConfig().getBoolean("update-stats")) return;
         if(!plugin.getAConfig().getBoolean("update-on-leave")) return;
-        plugin.getCache().updatePlayerStats(e.getPlayer());
+        plugin.getScheduler().runTaskAsynchronously(() -> plugin.getCache().updatePlayerStats(e.getPlayer()));
     }
 }

@@ -8,15 +8,16 @@ import us.ajg0702.leaderboards.LeaderboardPlugin;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static us.ajg0702.leaderboards.LeaderboardPlugin.message;
 
 public class Reset extends SubCommand {
 
     private final LeaderboardPlugin plugin;
-    final HashMap<Object, String> confirmResets = new HashMap<>();
+    final Map<Object, String> confirmResets = new ConcurrentHashMap<>();
 
     public Reset(LeaderboardPlugin plugin) {
         super("reset", Collections.emptyList(), null, "Clear all data of a leaderboard");

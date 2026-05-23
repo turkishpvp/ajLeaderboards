@@ -15,8 +15,8 @@ import us.ajg0702.leaderboards.LeaderboardPlugin;
 import us.ajg0702.leaderboards.displays.signs.BoardSign;
 import us.ajg0702.utils.spigot.VersionSupport;
 
-import java.util.HashMap;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class HeadManager {
     private final LeaderboardPlugin plugin;
@@ -118,7 +118,7 @@ public class HeadManager {
         }
     }
 
-    private final HashMap<Location, UUID> headLocationCache = new HashMap<>();
+    private final ConcurrentHashMap<Location, UUID> headLocationCache = new ConcurrentHashMap<>();
 
     public void checkHead(Location loc, String name, UUID id) {
         Validate.notNull(loc);
@@ -161,5 +161,9 @@ public class HeadManager {
             });
         }
         headLocationCache.put(loc, id);
+    }
+
+    public void clearCache() {
+        headLocationCache.clear();
     }
 }

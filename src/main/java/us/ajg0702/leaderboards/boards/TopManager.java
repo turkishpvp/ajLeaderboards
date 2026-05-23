@@ -31,6 +31,7 @@ public class TopManager {
 
     private final ThreadPoolExecutor fetchService;
     //private final ThreadPoolExecutor fetchService = (ThreadPoolExecutor) Executors.newCachedThreadPool();
+    private static final int MAX_FETCH_QUEUE_SIZE = 5000;
 
     private final AtomicInteger fetching = new AtomicInteger(0);
 
@@ -38,8 +39,11 @@ public class TopManager {
         fetchService.getQueue().clear(); // clear queue so we dont wait for all tasks in the queue to run
         fetchService.shutdown();
         try {
-            fetchService.awaitTermination(fast ? 2 : 15, TimeUnit.SECONDS);
+            if(!fetchService.awaitTermination(fast ? 2 : 15, TimeUnit.SECONDS)) {
+                fetchService.shutdownNow();
+            }
         } catch (InterruptedException ignored) {}
+        clearCaches();
     }
 
     private static final String OUT_OF_THREADS_MESSAGE = "unable to create native thread: possibly out of memory or process/resource limits reached";
@@ -69,7 +73,7 @@ public class TopManager {
         fetchService = new ThreadPoolExecutor(
                 t, t,
                 keepAlive, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>(1000000),
+                new LinkedBlockingQueue<>(MAX_FETCH_QUEUE_SIZE),
                 threadFactory
         );
         fetchService.allowCoreThreadTimeOut(true);
@@ -110,8 +114,8 @@ public class TopManager {
                         return plugin.getCache().getStat(key.getPosition(), key.getBoard(), key.getType());
                     });
                     if(plugin.isShuttingDown()) return Futures.immediateFuture(oldValue);
-                    fetchService.execute(task);
-                    return task;
+                    if(submitFetch(task)) return task;
+                    return Futures.immediateFuture(oldValue);
                 }
             });
 
@@ -134,12 +138,17 @@ public class TopManager {
                 if (positionFetching.add(key)) {
                     if (plugin.isShuttingDown()) return StatEntry.loading(plugin, position, board, type);
                     if (plugin.getAConfig().getBoolean("fetching-de-bug")) Debug.info("Starting fetch on " + key);
-                    fetchService.submit(() -> {
-                        positionCache.getUnchecked(key);
+                    if(!submitFetch(() -> {
+                        try {
+                            positionCache.getUnchecked(key);
+                        } finally {
+                            positionFetching.remove(key);
+                            if (plugin.getAConfig().getBoolean("fetching-de-bug"))
+                                Debug.info("Fetch finished on " + key);
+                        }
+                    })) {
                         positionFetching.remove(key);
-                        if (plugin.getAConfig().getBoolean("fetching-de-bug"))
-                            Debug.info("Fetch finished on " + key);
-                    });
+                    }
                 }
                     if (plugin.getAConfig().getBoolean("fetching-de-bug")) Debug.info("Returning loading for " + key);
                     return StatEntry.loading(plugin, position, board, type);
@@ -207,6 +216,7 @@ public class TopManager {
     }
 
     Map<PlayerBoardType, Long> statEntryLastRefresh = new ConcurrentHashMap<>();
+    Set<PlayerBoardType> statEntryFetching = ConcurrentHashMap.newKeySet();
     LoadingCache<PlayerBoardType, StatEntry> statEntryCache = CacheBuilder.newBuilder()
             .expireAfterAccess(1, TimeUnit.HOURS)
             .refreshAfterWrite(5, TimeUnit.SECONDS)
@@ -233,8 +243,8 @@ public class TopManager {
                         return plugin.getCache().getStatEntry(key.getPlayer(), key.getBoard(), key.getType());
                     });
                     if(plugin.isShuttingDown()) return Futures.immediateFuture(oldValue);
-                    fetchService.execute(task);
-                    return task;
+                    if(submitFetch(task)) return task;
+                    return Futures.immediateFuture(oldValue);
                 }
             });
 
@@ -255,7 +265,7 @@ public class TopManager {
                     cached = statEntryCache.getUnchecked(key);
                 } else {
                     if (plugin.isShuttingDown()) return StatEntry.loading(player, key.getBoardType());
-                    fetchService.submit(() -> statEntryCache.getUnchecked(key));
+                    submitStatEntryFetch(key);
                     return StatEntry.loading(player, key.getBoardType());
                 }
             }
@@ -283,7 +293,7 @@ public class TopManager {
             r = statEntryCache.getIfPresent(key);
             if(fetchIfAbsent && r == null) {
                 if (plugin.isShuttingDown()) return null;
-                fetchService.submit(() -> statEntryCache.getUnchecked(key));
+                submitStatEntryFetch(key);
             }
         } catch(Exception e) {
             String message = e.getMessage();
@@ -306,7 +316,17 @@ public class TopManager {
             r = positionCache.getIfPresent(positionBoardType);
             if (r == null && fetchIfAbsent) {
                 if (plugin.isShuttingDown()) return null;
-                fetchService.submit(() -> positionCache.getUnchecked(positionBoardType));
+                if(positionFetching.add(positionBoardType)) {
+                    if(!submitFetch(() -> {
+                        try {
+                            positionCache.getUnchecked(positionBoardType);
+                        } finally {
+                            positionFetching.remove(positionBoardType);
+                        }
+                    })) {
+                        positionFetching.remove(positionBoardType);
+                    }
+                }
             }
         } catch(Exception e) {
             String message = e.getMessage();
@@ -322,6 +342,7 @@ public class TopManager {
 
 
     Map<String, Long> boardSizeLastRefresh = new ConcurrentHashMap<>();
+    Set<String> boardSizeFetching = ConcurrentHashMap.newKeySet();
     LoadingCache<String, Integer> boardSizeCache = CacheBuilder.newBuilder()
             .expireAfterAccess(24, TimeUnit.HOURS)
             .refreshAfterWrite(15, TimeUnit.SECONDS)
@@ -345,8 +366,8 @@ public class TopManager {
                         return plugin.getCache().getBoardSize(key);
                     });
                     if(plugin.isShuttingDown()) return Futures.immediateFuture(oldValue);
-                    fetchService.execute(task);
-                    return task;
+                    if(submitFetch(task)) return task;
+                    return Futures.immediateFuture(oldValue);
                 }
             });
 
@@ -366,7 +387,7 @@ public class TopManager {
                     cached = boardSizeCache.getUnchecked(board);
                 } else {
                     if (plugin.isShuttingDown()) return -2;
-                    fetchService.submit(() -> boardSizeCache.getUnchecked(board));
+                    submitBoardSizeFetch(board);
                     return -2;
                 }
             }
@@ -385,6 +406,7 @@ public class TopManager {
     }
 
     Map<BoardType, Long> totalLastRefresh = new ConcurrentHashMap<>();
+    Set<BoardType> totalFetching = ConcurrentHashMap.newKeySet();
     LoadingCache<BoardType, Double> totalCache = CacheBuilder.newBuilder()
             .expireAfterAccess(24, TimeUnit.HOURS)
             .refreshAfterWrite(15, TimeUnit.SECONDS)
@@ -408,8 +430,8 @@ public class TopManager {
                         return plugin.getCache().getTotal(key.getBoard(), key.getType());
                     });
                     if(plugin.isShuttingDown()) return Futures.immediateFuture(oldValue);
-                    fetchService.execute(task);
-                    return task;
+                    if(submitFetch(task)) return task;
+                    return Futures.immediateFuture(oldValue);
                 }
             });
 
@@ -431,7 +453,7 @@ public class TopManager {
                     cached = totalCache.getUnchecked(boardType);
                 } else {
                     if (plugin.isShuttingDown()) return -2;
-                    fetchService.submit(() -> totalCache.getUnchecked(boardType));
+                    submitTotalFetch(boardType);
                     return -2;
                 }
             }
@@ -474,7 +496,7 @@ public class TopManager {
     public void fetchBoardsAsync() {
         if (plugin.isShuttingDown()) return;
         checkWrong();
-        fetchService.submit(this::fetchBoards);
+        submitFetch(this::fetchBoards);
     }
     public List<String> fetchBoards() {
         int f = fetching.getAndIncrement();
@@ -569,7 +591,7 @@ public class TopManager {
     }
     public void fetchExtraAsync(UUID id, String placeholder) {
         if (plugin.isShuttingDown()) return;
-        fetchService.submit(() -> fetchExtra(id, placeholder));
+        submitFetch(() -> fetchExtra(id, placeholder));
     }
 
     public String getCachedExtra(UUID id, String placeholder) {
@@ -698,7 +720,78 @@ public class TopManager {
     @SuppressWarnings("UnusedReturnValue")
     public Future<?> submit(Runnable task) {
         if (plugin.isShuttingDown()) return null;
-        return fetchService.submit(task);
+        try {
+            return fetchService.submit(task);
+        } catch (RejectedExecutionException e) {
+            if(!plugin.isShuttingDown()) {
+                plugin.getLogger().warning("Fetch task rejected because the queue is full or shutting down.");
+            }
+            return null;
+        }
+    }
+
+    private boolean submitFetch(Runnable task) {
+        return submit(task) != null;
+    }
+
+    private void submitStatEntryFetch(PlayerBoardType key) {
+        if(!statEntryFetching.add(key)) return;
+        if(!submitFetch(() -> {
+            try {
+                statEntryCache.getUnchecked(key);
+            } finally {
+                statEntryFetching.remove(key);
+            }
+        })) {
+            statEntryFetching.remove(key);
+        }
+    }
+
+    private void submitBoardSizeFetch(String board) {
+        if(!boardSizeFetching.add(board)) return;
+        if(!submitFetch(() -> {
+            try {
+                boardSizeCache.getUnchecked(board);
+            } finally {
+                boardSizeFetching.remove(board);
+            }
+        })) {
+            boardSizeFetching.remove(board);
+        }
+    }
+
+    private void submitTotalFetch(BoardType boardType) {
+        if(!totalFetching.add(boardType)) return;
+        if(!submitFetch(() -> {
+            try {
+                totalCache.getUnchecked(boardType);
+            } finally {
+                totalFetching.remove(boardType);
+            }
+        })) {
+            totalFetching.remove(boardType);
+        }
+    }
+
+    public void clearCaches() {
+        positionCache.invalidateAll();
+        statEntryCache.invalidateAll();
+        boardSizeCache.invalidateAll();
+        totalCache.invalidateAll();
+        lastResetCache.invalidateAll();
+        extraCache.invalidateAll();
+        positionLastRefresh.clear();
+        statEntryLastRefresh.clear();
+        boardSizeLastRefresh.clear();
+        totalLastRefresh.clear();
+        extraLastRefresh.clear();
+        positionFetching.clear();
+        statEntryFetching.clear();
+        boardSizeFetching.clear();
+        totalFetching.clear();
+        positionPlayerCache.clear();
+        rolling.clear();
+        boardCache = null;
     }
 
 
