@@ -63,4 +63,17 @@ public class AsyncMemoryLeakStaticTest {
         assertTrue("OkHttp resources should be shut down on plugin disable",
                 headUtils.contains("httpClient.dispatcher().executorService().shutdown()"));
     }
+
+    @Test
+    public void quitCleanupDoesNotRequireBoardPlayerClass() throws IOException {
+        String cache = source("src/main/java/us/ajg0702/leaderboards/cache/Cache.java");
+        int cleanPlayerStart = cache.indexOf("public void cleanPlayer");
+        int cleanPlayerEnd = cache.indexOf("public List<String> getNonExistantBoards()");
+        String cleanPlayerSection = cache.substring(cleanPlayerStart, cleanPlayerEnd);
+
+        assertFalse("Logout cleanup should not load BoardPlayer",
+                cleanPlayerSection.contains("BoardPlayer"));
+        assertTrue("Zero-validation cleanup should use simple string keys",
+                cache.contains("List<String> zeroPlayers"));
+    }
 }

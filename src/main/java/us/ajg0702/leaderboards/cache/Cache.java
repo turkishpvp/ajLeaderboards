@@ -499,7 +499,7 @@ public class Cache {
 		}
 	}
 
-	List<BoardPlayer> zeroPlayers = new CopyOnWriteArrayList<>();
+	List<String> zeroPlayers = new CopyOnWriteArrayList<>();
 
 	public void updateStat(String board, OfflinePlayer player) {
 		if(!plugin.getTopManager().boardExists(board)) {
@@ -558,6 +558,7 @@ public class Cache {
 		Runnable updateTask = () -> {
 
 			BoardPlayer boardPlayer = new BoardPlayer(board, player);
+			String boardPlayerKey = getZeroPlayerKey(board, player);
 
 			if(waitedUpdate) {
 				UpdatePlayerEvent updatePlayerEvent = new UpdatePlayerEvent(boardPlayer);
@@ -587,14 +588,14 @@ public class Cache {
 			}
 
 			if(plugin.getAConfig().getBoolean("require-zero-validation")) {
-				if(output == 0 && !zeroPlayers.contains(boardPlayer)) {
-					zeroPlayers.add(boardPlayer);
+				if(output == 0 && !zeroPlayers.contains(boardPlayerKey)) {
+					zeroPlayers.add(boardPlayerKey);
 					Debug.info("Skipping "+player.getName()+" because they returned 0 for "+board);
 					return;
-				} else if(output == 0 && zeroPlayers.contains(boardPlayer)) {
+				} else if(output == 0 && zeroPlayers.contains(boardPlayerKey)) {
 					Debug.info("Not skipping "+player.getName()+" because they still returned 0 for "+board);
 				} else if(output != 0) {
-					zeroPlayers.remove(boardPlayer);
+					zeroPlayers.remove(boardPlayerKey);
 				}
 			}
 
@@ -990,8 +991,13 @@ public class Cache {
 	 * @param player the player to remove
 	 */
 	public void cleanPlayer(Player player) {
-		zeroPlayers.removeIf(boardPlayer -> boardPlayer.getPlayer().equals(player));
+		String playerPrefix = player.getUniqueId() + ":";
+		zeroPlayers.removeIf(boardPlayerKey -> boardPlayerKey.startsWith(playerPrefix));
 		plugin.getTopManager().positionPlayerCache.remove(player.getUniqueId());
+	}
+
+	private String getZeroPlayerKey(String board, OfflinePlayer player) {
+		return player.getUniqueId() + ":" + board;
 	}
 
 	public void clearCaches() {
