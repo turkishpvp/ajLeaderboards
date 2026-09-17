@@ -11,3 +11,5 @@ cache.mv.db
 .classpath
 .settings/
 node_modules
+.headroom/
+.codex/
